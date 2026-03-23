@@ -10,7 +10,7 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from brain import brain  # Instancia única del cerebro RAG
@@ -120,8 +120,8 @@ async def query_endpoint(request: QueryRequest):
     logger.info(f"Nueva consulta: {request.question[:100]}...")
     result = brain.generate_response(request.question)
 
-    if result.get("error"):
-        # Si hubo error interno, retornar 500
+    if result.get("error") and result["error"] != "guardrails_blocked":
+        # Si hubo error interno (no de guardrails), retornar 500
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error interno: {result['error']}"
@@ -202,4 +202,3 @@ async def startup_event():
 async def shutdown_event():
     """Evento de cierre del servidor."""
     logger.info("Apagando servidor Mizu-Intelligence...")
-    # Limpieza si es necesaria (ej. cerrar conexiones)
