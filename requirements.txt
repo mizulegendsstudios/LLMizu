@@ -1,0 +1,24 @@
+# requirements.txt
+# Dependencias para Mizu-Intelligence con Gemini y embeddings locales
+
+# Web framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+
+# LangChain y componentes
+langchain==0.3.13
+langchain-community==0.3.13
+langchain-google-genai==2.0.0   # Integración con Gemini
+
+# Vector Store
+chromadb==0.5.23
+
+# Embeddings locales (sentence-transformers)
+sentence-transformers==3.0.1
+
+# Utilidades
+pydantic==2.10.4
+pydantic-settings==2.6.1
+python-dotenv==1.0.1
+pydantic-extra-types==2.10.1
