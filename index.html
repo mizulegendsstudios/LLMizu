@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Mizu Intelligence - Asistente por Voz</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #f1f5f9;
+        }
+        .container {
+            max-width: 800px;
+            width: 90%;
+            background: rgba(30, 41, 59, 0.8);
+            backdrop-filter: blur(10px);
+            border-radius: 2rem;
+            padding: 2rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            justify-content: center;
+        }
+        h1 span {
+            background: #3b82f6;
+            padding: 0.2rem 0.8rem;
+            border-radius: 100px;
+            font-size: 0.9rem;
+            font-weight: normal;
+        }
+        .status {
+            background: #0f172a;
+            border-radius: 1rem;
+            padding: 0.75rem 1rem;
+            margin: 1.5rem 0;
+            text-align: center;
+            font-weight: 500;
+            border-left: 4px solid #3b82f6;
+        }
+        .mic-button {
+            background: #3b82f6;
+            border: none;
+            color: white;
+            font-size: 1.5rem;
+            font-weight: bold;
+            padding: 1rem 2rem;
+            border-radius: 100px;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+            box-shadow: 0 4px 12px rgba(59,130,246,0.3);
+        }
+        .mic-button:hover {
+            background: #2563eb;
+            transform: scale(1.02);
+        }
+        .mic-button:active {
+            transform: scale(0.98);
+        }
+        .mic-button.recording {
+            background: #dc2626;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(220,38,38,0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(220,38,38,0); }
+            100% { box-shadow: 0 0 0 0 rgba(220,38,38,0); }
+        }
+        .transcript, .answer {
+            background: #0f172a;
+            border-radius: 1rem;
+            padding: 1rem;
+            margin-top: 1rem;
+            word-wrap: break-word;
+            white-space: pre-wrap;
+        }
+        .transcript {
+            border-left: 4px solid #f59e0b;
+        }
+        .answer {
+            border-left: 4px solid #10b981;
+        }
+        .label {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: #94a3b8;
+        }
+        .footer {
+            font-size: 0.7rem;
+            text-align: center;
+            margin-top: 2rem;
+            color: #64748b;
+        }
+        .error {
+            color: #f87171;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🎙️ Mizu Intelligence <span>v1.0</span></h1>
+    <p style="text-align: center; color: #94a3b8;">Asistente RAG con Gemini + voz</p>
+
+    <div class="status" id="status">✅ Listo. Presiona el botón para preguntar.</div>
+
+    <button class="mic-button" id="micBtn">
+        🎤 Preguntar por voz
+    </button>
+
+    <div class="transcript" id="transcriptArea" style="display: none;">
+        <div class="label">✍️ Transcripción</div>
+        <div id="transcriptText"></div>
+    </div>
+
+    <div class="answer" id="answerArea" style="display: none;">
+        <div class="label">🤖 Respuesta</div>
+        <div id="answerText"></div>
+    </div>
+
+    <div class="footer">
+        💡 Haz clic en el botón y habla con Kronos, tu asistente experto.
+    </div>
+</div>
+
+<script src="voice-service.js"></script>
+<script>
+    // Configuración: CAMBIA ESTA URL POR LA DE TU BACKEND (Codespaces o local)
+    const API_BASE_URL = 'https://xxxx-8000.app.github.dev'; // Reemplazar con tu URL real
+    // Si pruebas local: 'http://localhost:8000'
+
+    const voice = new MizuVoiceService(API_BASE_URL, { useStreaming: true, language: 'es-ES' });
+
+    const micBtn = document.getElementById('micBtn');
+    const statusDiv = document.getElementById('status');
+    const transcriptArea = document.getElementById('transcriptArea');
+    const transcriptText = document.getElementById('transcriptText');
+    const answerArea = document.getElementById('answerArea');
+    const answerText = document.getElementById('answerText');
+
+    voice.setCallbacks({
+        onListeningStart: () => {
+            statusDiv.innerHTML = '🎧 Escuchando... habla ahora';
+            micBtn.classList.add('recording');
+            micBtn.innerHTML = '🔴 Escuchando...';
+            transcriptArea.style.display = 'none';
+            answerArea.style.display = 'none';
+        },
+        onListeningEnd: () => {
+            statusDiv.innerHTML = '⏳ Procesando tu pregunta...';
+            micBtn.classList.remove('recording');
+            micBtn.innerHTML = '🎤 Preguntar por voz';
+        },
+        onPartialResult: (text) => {
+            transcriptArea.style.display = 'block';
+            transcriptText.innerHTML = text;
+        },
+        onFinalResult: (text) => {
+            transcriptArea.style.display = 'block';
+            transcriptText.innerHTML = text;
+            statusDiv.innerHTML = '🤔 Generando respuesta...';
+        },
+        onSpeakingStart: () => {
+            statusDiv.innerHTML = '🗣️ Hablando respuesta...';
+            micBtn.disabled = true;
+            micBtn.style.opacity = '0.6';
+        },
+        onSpeakingEnd: () => {
+            statusDiv.innerHTML = '✅ Listo. Haz clic para preguntar de nuevo.';
+            micBtn.disabled = false;
+            micBtn.style.opacity = '1';
+        },
+        onError: (err) => {
+            console.error('Error:', err);
+            statusDiv.innerHTML = `❌ Error: ${err}`;
+            micBtn.classList.remove('recording');
+            micBtn.innerHTML = '🎤 Preguntar por voz';
+            micBtn.disabled = false;
+            micBtn.style.opacity = '1';
+            answerArea.style.display = 'block';
+            answerText.innerHTML = `Error: ${err}. Revisa la consola.`;
+        }
+    });
+
+    // Sobrescribir speak para mostrar también el texto en la interfaz
+    const originalSpeak = voice.speak.bind(voice);
+    voice.speak = function(text) {
+        answerArea.style.display = 'block';
+        answerText.innerHTML = text;
+        originalSpeak(text);
+    };
+
+    micBtn.onclick = () => {
+        if (!micBtn.disabled) {
+            voice.startListening();
+        }
+    };
+</script>
+</body>
+</html>
