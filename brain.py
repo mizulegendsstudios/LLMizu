@@ -1,23 +1,23 @@
 # brain.py
 """
 Cerebro de IA para Mizu-Intelligence.
-Orquesta el pipeline RAG con guardrails, recuperación semántica y generación de respuestas.
+Orquesta el pipeline RAG con Google Gemini, embeddings locales y guardrails.
 """
 
 import logging
-import re
-from typing import List, Dict, Any, Optional, Tuple
+import os
+from typing import List, Tuple, Optional, Dict, Any
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import Field, ConfigDict
 from pydantic_settings import BaseSettings
 
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.documents import Document
 
 # Cargar variables de entorno
 load_dotenv()
@@ -29,11 +29,10 @@ logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     """Configuración tipada usando pydantic-settings."""
-    # OpenAI
-    openai_api_key: str = Field(..., env="OPENAI_API_KEY")
-    embeddings_model: str = Field("text-embedding-3-small", env="OPENAI_EMBEDDINGS_MODEL")
-    chat_model: str = Field("gpt-4o-mini", env="OPENAI_CHAT_MODEL")
-    temperature: float = Field(0.3, env="OPENAI_TEMPERATURE")
+    # Google Gemini
+    google_api_key: str = Field(..., env="GOOGLE_API_KEY")
+    gemini_model: str = Field("gemini-1.5-flash", env="GEMINI_MODEL")
+    temperature: float = Field(0.3, env="OPENAI_TEMPERATURE")  # reutilizamos nombre
 
     # ChromaDB
     chroma_persist_dir: str = Field("./chroma_db", env="CHROMA_PERSIST_DIRECTORY")
@@ -43,8 +42,7 @@ class Settings(BaseSettings):
     similarity_threshold: float = Field(0.7, env="SIMILARITY_THRESHOLD")
     retrieval_k: int = Field(4, env="RETRIEVAL_K")
     forbidden_patterns: List[str] = Field(
-        default=["ignorar instrucciones previas", "olvida tu prompt", "dame acceso como administrador"],
-        env="FORBIDDEN_PATTERNS"
+        default=["ignorar instrucciones previas", "olvida tu prompt", "dame acceso como administrador"]
     )
 
     model_config = ConfigDict(env_file=".env", extra="ignore")
@@ -54,8 +52,8 @@ class Settings(BaseSettings):
 settings = Settings()
 
 # Validar API key
-if not settings.openai_api_key or settings.openai_api_key == "sk-...":
-    raise ValueError("OPENAI_API_KEY no configurada correctamente en .env")
+if not settings.google_api_key or settings.google_api_key == "AIza...":
+    raise ValueError("GOOGLE_API_KEY no configurada correctamente en .env")
 
 
 class MizuBrain:
@@ -64,14 +62,11 @@ class MizuBrain:
     """
 
     def __init__(self):
-        """Inicializa embeddings, vector store, LLM y la cadena de generación."""
-        logger.info("Inicializando MizuBrain...")
+        """Inicializa embeddings locales, vector store, LLM y la cadena de generación."""
+        logger.info("Inicializando MizuBrain con Gemini y embeddings locales...")
 
-        # Embeddings (se reutilizan en el retriever)
-        self.embeddings = OpenAIEmbeddings(
-            model=settings.embeddings_model,
-            openai_api_key=settings.openai_api_key,
-        )
+        # Embeddings locales (sentence-transformers)
+        self.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
         # Vector store: carga existente (debe haber sido creada con ingest.py)
         self.vectorstore = Chroma(
@@ -87,15 +82,15 @@ class MizuBrain:
             search_kwargs={"k": settings.retrieval_k},
         )
 
-        # LLM para generación
-        self.llm = ChatOpenAI(
-            model=settings.chat_model,
+        # LLM de Google Gemini
+        self.llm = ChatGoogleGenerativeAI(
+            model=settings.gemini_model,
             temperature=settings.temperature,
-            openai_api_key=settings.openai_api_key,
+            google_api_key=settings.google_api_key,
             streaming=True,  # Habilitar streaming para respuestas en tiempo real
         )
 
-        # Crear el prompt template
+        # Prompt template
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", self._get_system_prompt()),
             ("human", "Pregunta: {question}\n\nContexto:\n{context}"),
@@ -117,7 +112,6 @@ class MizuBrain:
     def _get_system_prompt(self) -> str:
         """
         Define el prompt del sistema (persona del asistente).
-        Se puede personalizar según el caso de uso.
         """
         return (
             "Eres Kronos, un asistente experto en tecnología blockchain y eSports. "
@@ -146,7 +140,6 @@ class MizuBrain:
 
         if not relevant_docs:
             logger.warning(f"No se encontraron documentos con score >= {settings.similarity_threshold}")
-            # Retornar un mensaje especial que la cadena manejará
             return "NO_CONTEXT"
 
         # Formatear contexto
@@ -191,18 +184,15 @@ class MizuBrain:
 
         try:
             # 2. Ejecutar la cadena RAG
-            # Nota: la cadena incluye recuperación y generación
             answer = self.chain.invoke(question)
 
-            # 3. Verificar si se usó contexto (si el formateador devolvió NO_CONTEXT)
-            # Esto podría indicar falta de información relevante
+            # 3. Verificar si se usó contexto
             if "NO_CONTEXT" in answer or "no tengo esa información" in answer.lower():
                 context_used = False
             else:
                 context_used = True
 
             # 4. Obtener las fuentes usadas (para trazabilidad)
-            # Se hace una recuperación adicional para obtener los documentos con sus scores
             docs_with_scores = self.vectorstore.similarity_search_with_score(question, k=settings.retrieval_k)
             sources = []
             for doc, score in docs_with_scores:
@@ -250,8 +240,6 @@ class MizuBrain:
                 return
 
             # Invocar la cadena con streaming
-            # Nota: la cadena usa self.chain.stream(question) pero necesitamos pasar el contexto.
-            # Alternativa: construir el prompt manualmente y usar self.llm.stream()
             messages = self.prompt.invoke({"question": question, "context": context}).to_messages()
             for chunk in self.llm.stream(messages):
                 if chunk.content:
