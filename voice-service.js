@@ -2,7 +2,7 @@
  * voice-service.js
  * Servicio de voz para Mizu-Intelligence.
  * Conecta al backend RAG mediante fetch, con soporte de streaming y cola de síntesis.
- * Dependencias: Web Speech API (nativo, no requiere librerías externas).
+ * Dependencias: Web Speech API (nativo).
  */
 
 class MizuVoiceService {
@@ -190,7 +190,6 @@ class MizuVoiceService {
     async processUserInput(question) {
         if (!question || question.trim() === '') return;
 
-        // Mostrar feedback visual (si se implementa)
         console.log(`📤 Enviando: ${question}`);
 
         if (this.useStreaming) {
@@ -202,18 +201,12 @@ class MizuVoiceService {
 
     /**
      * Usa el endpoint /query/stream para recibir tokens incrementalmente.
-     * Cada token se va añadiendo a un buffer y se sintetiza en fragmentos.
-     * Para simplificar, se espera a recibir toda la respuesta y luego se sintetiza.
-     * Para una experiencia más natural, se podría sintetizar en trozos, pero
-     * se requiere un manejo más fino del corte de oraciones.
      */
     async processStreaming(question) {
         try {
             const response = await fetch(`${this.apiBaseUrl}/query/stream`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ question }),
             });
 
@@ -222,7 +215,6 @@ class MizuVoiceService {
                 throw new Error(`Error ${response.status}: ${errorText}`);
             }
 
-            // Leer el stream de texto
             const reader = response.body.getReader();
             const decoder = new TextDecoder('utf-8');
             let fullAnswer = '';
@@ -236,7 +228,6 @@ class MizuVoiceService {
                 console.debug('Chunk recibido:', chunk);
             }
 
-            // Una vez completa, sintetizar
             if (fullAnswer.trim()) {
                 this.speak(fullAnswer);
             } else {
@@ -250,16 +241,13 @@ class MizuVoiceService {
     }
 
     /**
-     * Usa el endpoint /query síncrono: obtiene respuesta completa más metadatos.
-     * Ideal para mostrar fuentes o depuración.
+     * Usa el endpoint /query síncrono.
      */
     async processSync(question) {
         try {
             const response = await fetch(`${this.apiBaseUrl}/query`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ question }),
             });
 
@@ -272,7 +260,6 @@ class MizuVoiceService {
             const answer = data.answer;
             const sources = data.sources;
 
-            // Mostrar fuentes en consola (o en UI)
             if (sources && sources.length > 0) {
                 console.log('📚 Fuentes utilizadas:', sources.map(s => `${s.source} (score: ${s.score})`).join(', '));
             }
@@ -308,10 +295,7 @@ class MizuVoiceService {
 
 // Ejemplo de uso (comentado):
 /*
-// Crear instancia apuntando al backend local
 const voice = new MizuVoiceService('http://localhost:8000', { useStreaming: true });
-
-// Configurar callbacks para actualizar la UI
 voice.setCallbacks({
     onListeningStart: () => console.log('Micrófono activado'),
     onListeningEnd: () => console.log('Micrófono desactivado'),
@@ -321,7 +305,5 @@ voice.setCallbacks({
     onSpeakingEnd: () => console.log('Termina síntesis'),
     onError: (err) => console.error('Error:', err)
 });
-
-// Iniciar escucha (ej. al hacer clic en un botón)
-// voice.startListening();
+voice.startListening();
 */
